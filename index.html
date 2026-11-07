@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="工时打卡">
+<meta name="theme-color" content="#ffffff">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<title>工时打卡</title>
+<style>
+:root{--bg:#fff;--fg:#111;--sub:#666;--faint:#999;--line:#e5e5e5;--mut:#f5f5f5}
+@media(prefers-color-scheme:dark){:root{--bg:#111;--fg:#f2f2f2;--sub:#aaa;--faint:#777;--line:#2c2c2c;--mut:#1d1d1d}}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,"PingFang SC",sans-serif;background:var(--bg);color:var(--fg);max-width:480px;margin:0 auto;padding:20px 16px 48px}
+.clock{font-size:52px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums;margin-top:4px}
+.meta{color:var(--sub);font-size:14px}
+.head{display:flex;justify-content:space-between;align-items:flex-start}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:13px;padding:4px 12px;border-radius:20px;border:1px solid var(--line)}
+.dot{width:8px;height:8px;border-radius:50%;background:#34c759}
+.dot.off{background:var(--faint)}
+.punch{width:100%;padding:18px;border:none;border-radius:14px;background:var(--fg);color:var(--bg);font-size:18px;font-weight:600;margin-top:20px;cursor:pointer}
+.punch:active{opacity:.75}
+.rule{font-size:13px;color:var(--sub);margin-top:10px;line-height:1.6}
+.stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:20px}
+.stat{border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.stat .v{font-size:21px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:2px}
+.stat .l{font-size:13px;color:var(--sub)}
+h4{font-size:14px;color:var(--sub);margin:24px 0 10px;font-weight:600}
+.bars{display:flex;gap:8px}
+.bar{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px}
+.barcol{width:100%;display:flex;align-items:flex-end;justify-content:center;height:60px;border-radius:6px;background:var(--mut)}
+.barfill{width:60%;border-radius:4px 4px 0 0;background:#0a84ff}
+.barlbl{font-size:12px;color:var(--sub)}
+.row{display:flex;align-items:center;justify-content:space-between;padding:10px 2px;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:none}
+.times{font-size:14px;color:var(--sub);font-variant-numeric:tabular-nums}
+.raw{font-size:12px;color:var(--faint);font-variant-numeric:tabular-nums}
+.dur{font-weight:600;font-variant-numeric:tabular-nums}
+.del{border:none;background:transparent;color:#ff3b30;font-size:15px;padding:6px 10px;border-radius:8px}
+.empty{color:var(--sub);padding:10px 2px;font-size:14px}
+</style>
+</head>
+<body>
+<div class="head">
+  <div>
+    <div class="meta" id="d">—</div>
+    <div class="clock" id="c">00:00:00</div>
+  </div>
+  <div class="pill"><span class="dot off" id="dot"></span><span id="st">未打卡</span></div>
+</div>
+
+<button class="punch" id="btn">上班打卡</button>
+<div class="rule">计算规则：以整点 / 半点为准，零头不计——10:08 记 10:00；10:30–10:59 记 10:30（加班半小时）；11:00 起算加班一小时。</div>
+
+<div class="stats">
+  <div class="stat"><div class="l">今日工时</div><div class="v" id="today">0小时0分</div></div>
+  <div class="stat"><div class="l">本月工时</div><div class="v" id="month">0小时0分</div></div>
+  <div class="stat"><div class="l">出勤天数</div><div class="v" id="days">0天</div></div>
+</div>
+
+<h4>近 7 天</h4>
+<div class="bars" id="bars"></div>
+
+<h4>打卡记录</h4>
+<div id="list"></div>
+
+<script>
+var KEY='worklog_v1',recs=[];
+try{recs=JSON.parse(localStorage.getItem(KEY)||'[]')}catch(e){recs=[]}
+function pad(n){return n<10?'0'+n:''+n}
+function keyOf(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())}
+function hm(ts){var d=new Date(ts);return pad(d.getHours())+':'+pad(d.getMinutes())}
+function fmt(ms){var m=Math.round(ms/60000);return Math.floor(m/60)+'小时'+(m%60)+'分'}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(recs))}catch(e){}}
+function eff(ts){var d=new Date(ts);d.setMinutes(d.getMinutes()>=30?30:0,0,0);return d.getTime()}
+var todayKey=keyOf(new Date());
+function findOpen(){for(var i=0;i<recs.length;i++)if(recs[i].out==null)return recs[i];return null}
+function durOf(r,now){return (r.out!=null?eff(r.out):eff(now))-eff(r.in)}
+function render(now){
+  var open=findOpen();
+  document.getElementById('btn').textContent=open?'下班打卡（记 '+hm(eff(now))+'）':'上班打卡（记 '+hm(eff(now))+'）';
+  document.getElementById('st').textContent=open?'工作中 · '+hm(eff(open.in))+' 上班':'未打卡';
+  document.getElementById('dot').className='dot'+(open?'':' off');
+  var monthKey=todayKey.slice(0,7),mTotal=0,days={},tTotal=0,i,r;
+  for(i=0;i<recs.length;i++){r=recs[i];
+    if(r.date.slice(0,7)===monthKey){mTotal+=durOf(r,now);days[r.date]=1}
+    if(r.date===todayKey)tTotal+=durOf(r,now)}
+  document.getElementById('today').textContent=fmt(tTotal);
+  document.getElementById('month').textContent=fmt(mTotal);
+  document.getElementById('days').textContent=Object.keys(days).length+'天';
+  var list=document.getElementById('list');list.innerHTML='';
+  var sorted=recs.slice().sort(function(a,b){return b.in-a.in}).slice(0,15);
+  if(!sorted.length)list.innerHTML='<div class="empty">还没有记录，点上面的按钮打卡吧。</div>';
+  sorted.forEach(function(r){
+    var row=document.createElement('div');row.className='row';
+    var left=document.createElement('div');
+    left.innerHTML='<div style="font-size:15px;font-weight:600">'+r.date+'</div><div class="times">'+hm(eff(r.in))+' – '+(r.out!=null?hm(eff(r.out)):'进行中…')+'</div><div class="raw">实际打卡 '+(hm(r.in)+(r.out!=null?' – '+hm(r.out):''))+'</div>';
+    var right=document.createElement('div');right.style.cssText='display:flex;align-items:center;gap:8px';
+    var dur=document.createElement('span');dur.className='dur';dur.textContent=fmt(durOf(r,now));
+    var del=document.createElement('button');del.className='del';del.textContent='删除';
+    del.onclick=function(){if(confirm('删除 '+r.date+' 这条记录？')){recs=recs.filter(function(x){return x.id!==r.id});save();render(Date.now())}};
+    right.appendChild(dur);right.appendChild(del);
+    row.appendChild(left);row.appendChild(right);list.appendChild(row);
+  });
+  var bars=document.getElementById('bars');bars.innerHTML='';
+  var wd=['日','一','二','三','四','五','六'],max=1,map={},d;
+  for(i=0;i<recs.length;i++){r=recs[i];map[r.date]=(map[r.date]||0)+durOf(r,now)}
+  for(i=6;i>=0;i--){d=new Date();d.setDate(d.getDate()-i);var v=map[keyOf(d)]||0;if(v>max)max=v}
+  for(i=6;i>=0;i--){
+    d=new Date();d.setDate(d.getDate()-i);var k2=keyOf(d),v2=map[k2]||0;
+    var b=document.createElement('div');b.className='bar';
+    b.innerHTML='<div class="barcol"><div class="barfill" style="height:'+(v2>0?Math.max(8,Math.round(v2/max*56)):2)+'px;opacity:'+(v2>0?(k2===todayKey?1:0.45):0.15)+'"></div></div><div class="barlbl">'+wd[d.getDay()]+'</div>';
+    bars.appendChild(b);
+  }
+}
+document.getElementById('btn').onclick=function(){
+  var now=Date.now(),o=findOpen();
+  if(o){o.out=now}else{recs.push({id:now+''+Math.random().toString(36).slice(2,6),date:todayKey,in:now,out:null})}
+  save();render(now);
+  if(navigator.vibrate)navigator.vibrate(20);
+};
+function tick(){
+  var d=new Date();
+  document.getElementById('c').textContent=pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds());
+  document.getElementById('d').textContent=d.getFullYear()+'年'+(d.getMonth()+1)+'月'+d.getDate()+'日 星期'+['日','一','二','三','四','五','六'][d.getDay()];
+  render(d.getTime());
+}
+tick();setInterval(tick,1000);
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(function(){});
+</script>
+</body>
+</html>
